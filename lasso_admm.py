@@ -12,7 +12,7 @@ from utils import generate_conditional_data
 
 
 def lasso_admm(X, y, X_mu, X_Sigma, alpha, T_coef, rho=1., rel_par=1., QUIET=True,\
-               MAX_ITER=50, ABSTOL=1e-3, RELTOL=1e-2, is_NN=True, ftr_=None, scaler=None, l2_lmbda=0):
+               MAX_ITER=50, ABSTOL=1e-3, RELTOL=1e-2, is_NN=True, ftr_=None, scaler=None, lr=8e-3, EPOCHS=35, l2_lmbda=0):
     '''
     Fit MRD-lasso using ADMM
     X: Training features\
@@ -23,6 +23,8 @@ def lasso_admm(X, y, X_mu, X_Sigma, alpha, T_coef, rho=1., rel_par=1., QUIET=Tru
     is_NN: Using Pytorch. Must be true if T_coef > 0.
     ftr_: is not None (int), then optimizing (MRD) for the specific given feature. 
     scaler: The scaler of the features. Should be in the form of Sklearn.
+    lr: learning rate for the Pytorch mechanism.
+    EPOCHS: number of empochs for the Pytorch mechanism.
     All others inputs are for the ADMM procedure.
     '''
     
@@ -71,13 +73,12 @@ def lasso_admm(X, y, X_mu, X_Sigma, alpha, T_coef, rho=1., rel_par=1., QUIET=Tru
         # x-update
         if is_NN:
             l = nn.MSELoss()
-            lr=8e-3
             model = LassoNN(p)
             model.fc_layer[0]._parameters['weight'] = \
                 (torch.tensor(x).type(torch.FloatTensor)).clone().detach().T
             optimizer = torch.optim.Adam(model.parameters(), lr=lr)
                 
-            for epoch in range(35):
+            for epoch in range(EPOCHS):
 
                 ftrs = np.random.permutation(range(p))[:int(.25 * p)] if ftr_ is None else [ftr_]
                 if T_coef != 0:
