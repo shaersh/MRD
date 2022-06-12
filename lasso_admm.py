@@ -12,11 +12,26 @@ from utils import generate_conditional_data
 
 
 def lasso_admm(X, y, X_mu, X_Sigma, alpha, T_coef, rho=1., rel_par=1., QUIET=True,\
-               MAX_ITER=50, ABSTOL=1e-3, RELTOL=1e-2, is_NN=False, ftr_=None, scaler=None, l2_lmbda=0):
-
+               MAX_ITER=50, ABSTOL=1e-3, RELTOL=1e-2, is_NN=True, ftr_=None, scaler=None, l2_lmbda=0):
+    '''
+    Fit MRD-lasso using ADMM
+    X: Training features\
+    y: Training respone (labels)
+    X_mu: The expectation vector of the features, i.e., np.mean(X, axis=0)
+    X_Sigma: The covariance matrix of the features, i.e.,  np.cov(X.T)
+    T_coef: The MRD penalty parameter (\lambda in the paper)
+    is_NN: Using Pytorch. Must be true if T_coef > 0.
+    ftr_: is not None (int), then optimizing (MRD) for the specific given feature. 
+    scaler: The scaler of the features. Should be in the form of Sklearn.
+    All others inputs are for the ADMM procedure.
+    '''
+    
     if T_coef < 0 or T_coef > 1:
         raise ValueError("lambda should be between 0 to 1")
-
+    
+    if T_coef>0:
+        assert is_NN, 'is_NN must be true if T_coef >0'
+    
     alpha = (1 - T_coef) * alpha
 
     if not QUIET:
