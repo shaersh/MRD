@@ -6,7 +6,7 @@ import numpy as np
 import os
 import sys
 import pandas as pd
-from utils import create_AR1_Sigma,create_sparse_vector,create_normal_noise,hrt_gauss,generate_conditional_data, set_seed,loss_f
+from utils import hrt_gauss,generate_conditional_data, set_seed,loss_f
 from LassoNN import LassoNN
 from data import DataGenerator
 
