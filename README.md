@@ -1,4 +1,4 @@
-# MRD
+# Maximum Risk Discrepancy (MRD)
 This a repository for reproducing the main experiments from the paper "Learning to Increas the Power of Conditional Randomization Tests".
 The code is adapted to work in SLURM environment.
 To run it locally, you can run the main script and adapt the main function.
