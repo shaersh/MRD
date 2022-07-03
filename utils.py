@@ -1,12 +1,27 @@
 import numpy as np
 from scipy import sparse
 import torch
+from torch import nn
 
-def create_sparse_vector(rows=1000, density=0.2,seed=0):
-    S = sparse.random(m=rows, n=1, density=density, format='coo', dtype=None, random_state=seed, data_rvs=None)
-    sparse_vec = S.A
-    beta = [sparse_vec != 0][0].astype(int)
-    return beta
+
+def set_seed(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    np.random.seed(seed)
+
+
+def loss_f(y_hat, y, model, T=torch.tensor([0.]), T_tilda=torch.tensor([0.]), T_coef=0):
+    l = nn.MSELoss()
+    weights_co = torch.sigmoid(list(model.cancelout.parameters())[0])
+    l1_norm = torch.norm(weights_co, 1)
+    var = torch.var(list(model.cancelout.parameters())[0])
+    loss = (1 - T_coef) * 0.5 * l(y, y_hat) + \
+           (1 - T_coef) * 0.001 * (l1_norm - var) + \
+           T_coef * torch.sigmoid(T - T_tilda).mean()
+
+    return loss
+
 
 def create_conditional_gauss(X, j, mu=None, sigma=None):
     a = np.delete(X, j, 1)
@@ -33,20 +48,7 @@ def create_conditional_gauss(X, j, mu=None, sigma=None):
 def create_normal_noise(mu, sigma, shape):
     return np.random.normal(mu, sigma, (shape[0], shape[1]))
 
-def create_labels(X, beta):
-    n, p = X.shape
-    v = create_normal_noise(mu=0, sigma=1, shape=(n, 1))
-    Y = X @ beta + v
-    return Y
 
-
-def generate_fake_data(X, X_mu, X_Sigma, j):
-    n, p = X.shape
-    mu_tilda, sigma_tilda = create_conditional_gauss(X, j, X_mu, X_Sigma)
-    Xj_tilda = create_normal_noise(mu=mu_tilda, sigma=sigma_tilda, shape=(n, 1))
-    X_tilda = X.copy()
-    X_tilda[:, j] = Xj_tilda.ravel()
-    return X_tilda, mu_tilda, sigma_tilda
 
 def generate_conditional_data(X, X_mu, X_Sigma, ftrs_=None):
     n, p = X.shape
@@ -62,14 +64,6 @@ def generate_conditional_data(X, X_mu, X_Sigma, ftrs_=None):
         X_tilda[:, j] = Xj_tilda.ravel().copy()
     return X_tilda
 
-
-def create_AR1_Sigma(p, rho=0.5):
-    Sigma = np.eye(p)
-    for i in range(p):
-        for j in range(p):
-            Sigma[i, j] = rho ** (abs(i - j))
-    mu = np.zeros((p, 1)).ravel()
-    return mu, Sigma
 
 
 def hrt_gauss(model, t, X_test, Y_test, j, mu=None, Sigma=None,

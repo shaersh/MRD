@@ -2,59 +2,31 @@ import torch
 from torch import nn
 from sklearn.linear_model import LassoCV,RidgeCV,ElasticNetCV
 import numpy as np
-import scipy as sp
-import pickle
+
 import os
 import sys
 import pandas as pd
-from utils import create_AR1_Sigma,create_sparse_vector,create_normal_noise,hrt_gauss,generate_conditional_data
-from scipy import sparse
-from sklearn.utils import shuffle
+from utils import hrt_gauss,generate_conditional_data, set_seed,loss_f
 from LassoNN import LassoNN
+from data import DataGenerator
 
-
-from statsmodels.stats.multitest import multipletests
 from lasso_admm import lasso_admm
 from sklearn.preprocessing import StandardScaler
 
-def loss_f(y_hat,y,model,alpha,T=torch.tensor([0.]),T_tilda=torch.tensor([0.]),T_coef=0):
-  l=nn.MSELoss()
-  weights_co = torch.sigmoid(list(model.cancelout.parameters())[0])
-  l1_norm = torch.norm(weights_co, 1)
-  var = torch.var(list(model.cancelout.parameters())[0])
-  loss = (1-T_coef)*0.5*l(y,y_hat) +\
-    (1-T_coef)*0.001*(l1_norm-var) +\
-    T_coef*torch.sigmoid(T-T_tilda).mean()
-  
-  return loss
-  
-def set_seed(seed):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-    np.random.seed(seed)
     
 
 
-def experiment_real(c,seed,rho,lmbda=None,one_ftr=False):
-    df = pd.read_csv('./data/HIV.csv').dropna().to_numpy()
-    set_seed(seed)
+def experiment_real(c,seed):
     p_vals_mrd_lasso = []
     p_vals_lasso = []
     p_vals_enet = []
     p_vals_mrd_enet = []
-    X = df[:, 1:]
-    Y = df[:, 0]
-    n, p = X.shape
-    X, Y = shuffle(X, Y, random_state=seed)
-    Y = Y.reshape(-1, 1)
-    X_mu, X_Sigma = np.mean(X, axis=0), np.cov(X.T)
 
-    train_ratio = 0.5
-    X_train = X[0:int(train_ratio * n)]
-    Y_train = Y[0:int(train_ratio * n)]
-    X_test = X[int(train_ratio * n):]
-    Y_test = Y[int(train_ratio * n):]
+    real_data_gen = DataGenerator()
+    X_mu, X_Sigma, (X_train, Y_train, X_test, Y_test) = real_data_gen.process_real_data(seed=seed, train_test_ratio=0.5)
+
+    p = X_train.shape[1]
+
     scaler_Y = StandardScaler().fit(Y_train)
     Y_train = scaler_Y.transform(Y_train)
     Y_test = scaler_Y.transform(Y_test)
@@ -125,29 +97,15 @@ def experiment_real(c,seed,rho,lmbda=None,one_ftr=False):
 
 
     
-def experiment_NN(c,seed,is_linear=False):
+def experiment_NN(c,seed,is_linear=False, lr=5e-3, EPOCHS=60, is_est=False):
     # Set seed for reproducibility
     set_seed(seed)
-    p = 100;
-    n = 800;
-    X_mu, X_Sigma = create_AR1_Sigma(p, rho=0.25)
-    X = np.random.multivariate_normal(X_mu, X_Sigma, n)
-    ones = create_sparse_vector(p, 0.3)
-    for i,one in enumerate(ones):
-      if np.random.rand() > 0.5:
-          ones[i]=-one
-    beta = c * ones
 
-    v = create_normal_noise(mu=0, sigma=1, shape=(n, 1))
-    if is_linear:
-        Y = X @ beta + v
-    else:
-        Y = 0.5*np.power(X @ beta,3) + v
-
-    X_train = X[0:int(0.5 * n)]
-    Y_train = Y[0:int(0.5 * n)]
-    X_test = X[int(0.5 * n) + 1:]
-    Y_test = Y[int(0.5 * n) + 1:]
+    data_gen = DataGenerator(n=800,p=100)
+    ones, X_mu, X_Sigma, (X_train, Y_train, X_test, Y_test) = data_gen.generate_AR1_data(c, rho=0.25, sparsity=0.3,
+                                                                                         is_linear=is_linear, type='Poly',
+                                                                                         train_test_ratio=0.5,
+                                                                                         is_est=is_est)
     
     scaler_X=StandardScaler().fit(X_train)
     scaler_Y=StandardScaler().fit(Y_train)
@@ -162,11 +120,10 @@ def experiment_NN(c,seed,is_linear=False):
     ftr_ = None
     n,p = X_train.shape
 
-    x = np.zeros((p,1))
     y=Y_train
     X=X_train
-    lr=5e-3
-    num_epochs = 60
+    lr=lr
+    num_epochs = EPOCHS
     ############# Train NN ################
     model_0=LassoNN(p,is_linear=is_linear)
     optimizer = torch.optim.Adam(model_0.parameters(), lr=lr)
@@ -281,47 +238,28 @@ def experiment(c,seed,rho,lmbda=None,is_linear=True,is_est=False,GMM=False):
     p_vals_enet = []
     p_vals_mrd_enet = []
     p_vals_ridge = []
-    n=800;p=100
-    X_mu, X_Sigma = create_AR1_Sigma(p, rho=0.25)
-    ones = create_sparse_vector(p, 0.3)
-    rng = range(p)
-    for i,one in enumerate(ones):
-      if np.random.rand() > 0.5:
-          ones[i]=-one
-    beta = c * ones
-    if GMM:
-      X=np.zeros((n,p))
-      for sample in range(n):
-        randnum = np.random.rand()*3
-        if randnum < 1:
-          X_mu, X_Sigma = create_AR1_Sigma(p, rho=0.1)
-          X[sample] = np.random.multivariate_normal(X_mu, X_Sigma, 1)
-        elif randnum < 2:
-          X_mu, X_Sigma = create_AR1_Sigma(p, rho=0.2)
-          X[sample] = np.random.multivariate_normal(X_mu, X_Sigma, 1)
-        else:
-          X_mu, X_Sigma = create_AR1_Sigma(p, rho=0.3)
-          X[sample] = np.random.multivariate_normal(X_mu, X_Sigma, 1)
-    else:
-      X = np.random.multivariate_normal(X_mu, X_Sigma, n)
-    if is_est:
-        X_mu,X_Sigma = np.mean(X, axis=0),np.cov(X.T)
-    v = create_normal_noise(mu=0, sigma=1, shape=(n, 1))
-    if is_linear:
-        Y = X @ beta + v
-    else:
-        Y = 0.5*np.power(X @ beta,3) + v
 
-    X_train = X[0:int(0.5 * n)]
-    Y_train = Y[0:int(0.5 * n)]
-    X_test = X[int(0.5 * n) + 1:]
-    Y_test = Y[int(0.5 * n) + 1:]
-    
+    data_gen = DataGenerator(n=800, p=100)
+    if GMM:
+        ones, X_mu, X_Sigma, (X_train, Y_train, X_test, Y_test) = data_gen.generate_GMM_data(c, rhos=[0.1,0.2,0.3],
+                                                                                             sparsity=0.3,
+                                                                                             is_linear=is_linear,
+                                                                                             type='Poly',
+                                                                                             train_test_ratio=0.5)
+    else:
+        ones, X_mu, X_Sigma, (X_train, Y_train, X_test, Y_test) = data_gen.generate_AR1_data(c, rho=0.25, sparsity=0.3,
+                                                                                             is_linear=is_linear,
+                                                                                             type='Poly',
+                                                                                             train_test_ratio=0.5,
+                                                                                             is_est=is_est)
+
+
     scaler_X=StandardScaler().fit(X_train)
     scaler_Y=StandardScaler().fit(Y_train)
     X_train, Y_train =scaler_X.transform(X_train), scaler_Y.transform(Y_train)
     X_test, Y_test =scaler_X.transform(X_test), scaler_Y.transform(Y_test)
 
+    rng = range(X_train.shape[1])
 
     #util model
     m = LassoCV(fit_intercept=False).fit(X_train, Y_train.ravel())
@@ -330,7 +268,7 @@ def experiment(c,seed,rho,lmbda=None,is_linear=True,is_est=False,GMM=False):
 
     # Enet
     elnet = ElasticNetCV(l1_ratio = [.1, .3, .5, .7, .9, .95],fit_intercept=False).fit(X_train,Y_train.ravel())
-    
+
     # Ridge
     # ridge = RidgeCV(fit_intercept=False).fit(X_train,Y_train.ravel())
 
@@ -439,8 +377,8 @@ if __name__ == '__main__':
         continue #exit()
       # Run experiment
       result = experiment(c,seed,rho,lmbda=lmbda_,is_linear=True,is_est=False,GMM=False)
-      #result = experiment_NN(c,seed,lmbda=lmbda_,is_real=False)
-      #result = experiment_real(c,seed,rho,lmbda=lmbda_)
+      #result = experiment_NN(c,seed,is_linear=False, lr=5e-3, EPOCHS=60, is_est=False)
+      #result = experiment_real(c,seed)
 
   
   
